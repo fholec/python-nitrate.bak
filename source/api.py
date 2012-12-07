@@ -2583,7 +2583,7 @@ class TestPlan(Mutable):
 
         # Initialize containers
         self._tags = PlanTags(self)
-        self._testcases = TestCases(self)
+        self._testcases = PlanCases(self)
         self._children = ChildPlans(self)
 
     def _update(self):
@@ -3408,10 +3408,10 @@ class TestCase(Mutable):
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#  Test Cases Class
+#  Plan Cases Class
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-class TestCases(Container):
+class PlanCases(Container):
     """ Test cases linked to a test plan. """
 
     def _get(self):
@@ -3436,6 +3436,34 @@ class TestCases(Container):
 
     def _remove(self, cases):
         """ Unlink provided cases from the test plan. """
+        for case in cases:
+            log.info("Unlinking {0} from {1}".format(
+                    case.identifier, self._identifier))
+            self._server.TestCase.unlink_plan(case.id, self.id)
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#  Run Cases Class
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class RunCases(Container):
+    """ Test cases linked to a test run """
+
+    def _get(self):
+        """ Fetch currently linked test cases from the server. """
+        log.info("Fetching {0}'s cases".format(self._identifier))
+        self._current = set([TestCase(testcasehash=hash)
+                for hash in self._server.TestRun.get_test_cases(self.id)])
+        self._original = set(self._current)
+
+    def _add(self, cases):
+        """ Link provided cases to the test run (create case runs) """
+        log.info("Linking {1} to {0}".format(self._identifier,
+                    listed([case.identifier for case in cases])))
+        self._server.TestCase.link_plan([case.id for case in cases], self.id)
+
+    def _remove(self, cases):
+        """ Unlink provided cases from the test run (delete case runs) """
         for case in cases:
             log.info("Unlinking {0} from {1}".format(
                     case.identifier, self._identifier))
