@@ -1,0 +1,54 @@
+# Nitrate server configuration
+[nitrate]
+#url = https://tcms.engineering.redhat.com/xmlrpc/
+url = https://tcms-stage.englab.bne.redhat.com/xmlrpc/
+
+# Self test configuration
+[test]
+url = https://tcms-stage.englab.bne.redhat.com/xmlrpc/
+
+[product]
+id = 60
+name = Red Hat Enterprise Linux 6
+
+[component]
+id = 25278
+name = wget
+product = Red Hat Enterprise Linux 6
+
+[testplan]
+id = 289
+name = Tessst plan
+type = Function
+product = Red Hat Enterprise Linux 6
+version = 6.1
+status = ENABLED
+
+[plantype]
+id = 26
+name = General
+
+[testrun]
+id = 6757
+summary = Tessst Run One
+
+[testcase]
+id = 46490
+summary = Tessst case one (RHEL6+)
+category = Sanity
+product = Red Hat Enterprise Linux 6
+
+[performance]
+testplan = 8020
+testrun = 52167
+smalltestplan = 8030
+smalltestrun = 52168
+
+[init]
+plantype = 26
+category = 702
+casestatus = 2
+version = 389
+build = 979
+bug = 1000
+product = RHEL Tests
