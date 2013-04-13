@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import types
+import optparse
 import unittest
 import xmlrpclib
 import unicodedata
@@ -80,9 +81,9 @@ def setLogLevel(level=None):
     log.warn("Deprecated call setLogLevel(), use set_log_level() instead")
     set_log_level(level)
 
-def info(message):
+def info(message, newline=True):
     """ Log provided info message to the standard error output """
-    sys.stderr.write(message + "\n")
+    sys.stderr.write(message + ("\n" if newline else ""))
 
 set_log_level()
 
@@ -861,6 +862,10 @@ class PlanType(Nitrate):
         if getattr(self, "_id", None) is not None:
             return
 
+        # Allow initialization by string e.g. PlanType("General")
+        if isinstance(id, basestring):
+            name = id
+            id = None
         # Initialized by id
         if id is not None:
             self._name = NitrateNone
@@ -912,6 +917,9 @@ class PlanType(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     class _test(unittest.TestCase):
+        def setUp(self):
+            """ Set up plan type from the config """
+            self.plantype = Nitrate()._config.plantype
 
         def testCachingOn(self):
             """ PlanType caching on """
@@ -956,6 +964,18 @@ class PlanType(Nitrate):
             def fun():
                 PlanType(name="Bad Plan Type").id
             self.assertRaises(NitrateError, fun)
+
+        def test_valid_type(self):
+            """ Valid test plan type initialization """
+            # Initialize by id
+            plantype = PlanType(self.plantype.id)
+            self.assertEqual(plantype.name, self.plantype.name)
+            # Initialize by name (explicit)
+            plantype = PlanType(name=self.plantype.name)
+            self.assertEqual(plantype.id, self.plantype.id)
+            # Initialize by name (autodetection)
+            plantype = PlanType(self.plantype.name)
+            self.assertEqual(plantype.id, self.plantype.id)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2192,6 +2212,27 @@ class Bugs(Mutable):
         # Currently no caching for bugs, changes applied immediately
         pass
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  Bugs Self Test
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    class _test(unittest.TestCase):
+        def setUp(self):
+            """ Set up performance test configuration from the config """
+            self.performance = Nitrate()._config.performance
+
+        def test_performance_case_bugs(self):
+            """
+                Test finds test plan with the same string pattern and displays
+                test cases and bug numbers related to test cases
+            """
+            for testplan in\
+                    TestPlan.search(name__contains="Tier 1 / Apps"):
+                for testcase in testplan.testcases:
+                    if testcase.bugs != None:
+                        for bug in testcase.bugs:
+                            print "  Related bug:" , bug.synopsis
+                            print testcase.author , bug.bug
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Plan Tags Class
@@ -2356,6 +2397,8 @@ class CaseTags(Container):
         def setUp(self):
             """ Set up test case from the config """
             self.testcase = Nitrate()._config.testcase
+            self.performance = Nitrate()._config.performance
+
 
         def testTagging1(self):
             """ Untagging a test case """
@@ -2383,6 +2426,11 @@ class CaseTags(Container):
             testcase.update()
             testcase = TestCase(self.testcase.id)
             self.assertTrue("TestTag" not in testcase.tags)
+
+        def test_performance_check_tags(self):
+            """ Test prints tags from a test cases present in a test plan """
+            for case in TestPlan(self.performance.testplan):
+                print case, ": ", case.tags
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3120,6 +3168,7 @@ class TestCase(Mutable):
             priority ....... priority object, id or name (default: P3)
             script ......... test path (default: None)
             tester ......... user object or login (default: None)
+            link ........... reference link
         """
 
         # Prepare attributes, check test case hash, initialize
@@ -3191,8 +3240,9 @@ class TestCase(Mutable):
                 tester = User(login=tester)
             hash["default_tester"] = tester.login
 
-        # Script
+        # Script & reference link
         hash["script"] = kwargs.get("script")
+        hash["extra_link"] = kwargs.get("link")
 
         # Case Status
         status = kwargs.get("status")
@@ -3342,6 +3392,7 @@ class TestCase(Mutable):
         def setUp(self):
             """ Set up test case from the config """
             self.testcase = Nitrate()._config.testcase
+            self.performance = Nitrate()._config.performance
 
         def testCreateInvalid(self):
             """ Create a new test case (missing required parameters) """
@@ -3356,6 +3407,49 @@ class TestCase(Mutable):
                     isinstance(case, TestCase), "Check created instance")
             self.assertEqual(case.summary, "Test case summary")
             self.assertEqual(case.priority, Priority("P3"))
+            self.assertEqual(str(case.category), "Sanity")
+
+        def testCreateValidWithOptionalFields(self):
+            """ Create a new test case, include optional fields """
+            # High-priority automated security-related test case
+            case = TestCase(
+                    summary="High-priority automated test case",
+                    product=self.testcase.product,
+                    category="Security",
+                    automated=True,
+                    manual=False,
+                    autoproposed=False,
+                    priority=Priority("P1"),
+                    script="/path/to/test/script",
+                    link="http://example.com/test-case-link")
+            self.assertTrue(
+                    isinstance(case, TestCase), "Check created instance")
+            self.assertEqual(case.summary, "High-priority automated test case")
+            self.assertEqual(case.script, "/path/to/test/script")
+            self.assertEqual(case.link, "http://example.com/test-case-link")
+            self.assertEqual(case.priority, Priority("P1"))
+            self.assertTrue(case.automated)
+            self.assertFalse(case.autoproposed)
+            self.assertFalse(case.manual)
+            # Low-priority manual sanity test case
+            case = TestCase(
+                    summary="Low-priority manual test case",
+                    product=self.testcase.product,
+                    category="Sanity",
+                    manual=True,
+                    autoproposed=True,
+                    automated=False,
+                    priority=Priority("P5"),
+                    link="http://example.com/another-case-link")
+            self.assertTrue(
+                    isinstance(case, TestCase), "Check created instance")
+            self.assertEqual(case.summary, "Low-priority manual test case")
+            self.assertEqual(case.script, None)
+            self.assertEqual(case.link, "http://example.com/another-case-link")
+            self.assertEqual(case.priority, Priority("P5"))
+            self.assertTrue(case.manual)
+            self.assertTrue(case.autoproposed)
+            self.assertFalse(case.automated)
 
         def testGetById(self):
             """ Fetch an existing test case by id """
@@ -3405,6 +3499,24 @@ class TestCase(Mutable):
                         self.assertEqual(testcase.automated, automated)
                         self.assertEqual(testcase.autoproposed, autoproposed)
                         self.assertEqual(testcase.manual, manual)
+
+    def test_performance_search_testcases(self):
+        """
+            Test searches a pattern in all test cases and displays the result
+            with their testers
+        """
+        for testcase in TestCase.search(summary__contains="python"):
+            print "{0}: {1}".format(testcase.tester, testcase)
+
+    def test_performance_author_test_cases(self):
+        """
+            Test displays test cases from specified author and also test plans
+            which contain these test cases
+        """
+        for testcase in TestCase.search(author=self.performance.author):
+            print "{0} is in test plans:".format(testcase)
+            for testplan in testcase.testplans:
+                print "  {0}".format(testplan.name)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3682,6 +3794,39 @@ class CaseRun(Mutable):
         # Update self (if modified)
         Mutable.update(self)
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  Case Runs Self Test
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    class _test(unittest.TestCase):
+        def setUp(self):
+            """ Set up performance test configuration from the config """
+            self.performance = Nitrate()._config.performance
+
+        def test_performance_update_caseruns(self):
+            """
+                Test for fetching caserun states from DB and updating them
+                focusing on the updating part
+            """
+            for caserun in TestRun(self.performance.testplan).caseruns:
+                print "{0} {1}".format(caserun.id, caserun.status)
+                caserun.status = Status("PASSED")
+                caserun.update()
+
+        def test_performance_case_runs(self):
+            """
+                Test for printing test cases that test run contains in
+                specified test plan (for example, test plans connected
+                to RHEL6.4).
+            """
+            for testplan in TestPlan.search(name__contains="rhel-6.4.0"):
+                print "{0}".format(testplan.name)
+                for testrun in testplan.testruns:
+                    print "  {0} {1} {2}".format(testrun, testrun.manager,\
+                            testrun.status)
+                    for caserun in testrun.caseruns:
+                        print "    {0} {1} {2}".format(caserun,\
+                                caserun.testcase, caserun.status)
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Self Test
@@ -3697,6 +3842,14 @@ if __name__ == "__main__":
     except AttributeError:
         raise NitrateError("No test server provided in the config file")
 
+    # Parse options
+    parser = optparse.OptionParser(
+            usage="python nitrate.api [--performance] [class [...]]")
+    parser.add_option("--performance",
+            action="store_true",
+            help="Run performance tests")
+    (options, arguments) = parser.parse_args()
+
     # Walk through all module classes
     import __main__
     for name in dir(__main__):
@@ -3706,7 +3859,14 @@ if __name__ == "__main__":
                 issubclass(object, Nitrate)):
             # Run the _test class if found & selected on command line
             test = getattr(object, "_test", None)
-            if test and (object.__name__ in sys.argv[1:] or not sys.argv[1:]):
-                print "\n{0}\n{1}".format(object.__name__, 70 * "~")
+            if test and (object.__name__ in arguments or not arguments):
                 suite = unittest.TestLoader().loadTestsFromTestCase(test)
+                # Filter only performance test cases when --performance given
+                suite = [case for case in suite
+                        if "performance" in str(case)
+                        or not options.performance]
+                if not suite:
+                    continue
+                suite = unittest.TestSuite(suite)
+                print "\n{0}\n{1}".format(object.__name__, 70 * "~")
                 unittest.TextTestRunner(verbosity=2).run(suite)

@@ -106,6 +106,10 @@ data of existing objects to be tested, for example:
     version = 6.1
     status = ENABLED
 
+    [plantype]
+    id = 1
+    name = General
+
     [testrun]
     id = 6757
     summary = Test Run Summary
@@ -113,6 +117,7 @@ data of existing objects to be tested, for example:
     [testcase]
     id = 1234
     summary = Test case summary
+    product = Red Hat Enterprise Linux 6
     category = Sanity
 
 To exercise the whole test suite just run "python nitrate.py". To test
@@ -138,5 +143,6 @@ __all__ = """
         setCacheLevel CACHE_NONE CACHE_CHANGES CACHE_OBJECTS CACHE_ALL
         setColorMode COLOR_ON COLOR_OFF COLOR_AUTO
         set_log_level set_cache_level set_color_mode
+        get_log_level get_cache_level get_color_mode
         """.split()
 
