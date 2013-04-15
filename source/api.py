@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import types
+import random
 import optparse
 import unittest
 import xmlrpclib
@@ -33,6 +34,8 @@ import logging as log
 from pprint import pformat as pretty
 from xmlrpc import NitrateError, NitrateKerbXmlrpc
 
+ALLstatuses = ['PAD', 'IDLE', 'PASSED', 'FAILED', 'RUNNING', 'PAUSED',
+               'BLOCKED', 'ERROR', 'WAIVED']
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Logging
@@ -337,6 +340,58 @@ def ascii(text):
     """ Transliterate special unicode characters into pure ascii. """
     if not isinstance(text, unicode): text = unicode(text)
     return unicodedata.normalize('NFKD', text).encode('ascii','ignore')
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#  MultiCall methods
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+MULTICALL_ON = 1
+MULTICALL_OFF = 0
+
+def multicall_get():
+    """ Get current multicall mode """
+    return _multicall_mode
+
+def multicall_set(mode=None):
+    """
+    Set the multicall mode
+
+    If enabled, some objects (currently only from CaseRun class) will use
+    MultiCall for updating its states (thus speeding up the process).
+
+    Possible values are:
+
+    MULTICALL_ON ..... multicall enabled
+    MULTICALL_OFF .... multicall disabled
+
+    Link to RFE in Bugzilla:
+
+        https://bugzilla.redhat.com/show_bug.cgi?id=896493
+    """
+
+    global _multicall_mode
+    global multicall
+    if mode is None:
+        _multicall_mode = MULTICALL_OFF
+    else:
+        if mode > 1 or mode < 0:
+            raise NitrateError("Invalid multicall mode '{0}'".format(mode))
+        else:
+            _multicall_mode = mode
+    if mode == MULTICALL_ON:
+        multicall = xmlrpclib.MultiCall(Nitrate()._server)
+        set_cache_level(CACHE_OBJECTS)
+        log.info("In order to enable MultiCall feature, CACHE_CHANGES level\
+                will be used")
+    log.debug("MultiCall mode {0}".format(mode))
+
+def multicall_call():
+    """ Execute multicall query """
+
+    response = multicall()
+    return None
+
+multicall_set()
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3782,7 +3837,10 @@ class CaseRun(Mutable):
 
         log.info("Updating case run " + self.identifier)
         log.debug(pretty(hash))
-        self._server.TestCaseRun.update(self.id, hash)
+        if multicall_get() == MULTICALL_OFF:
+            self._server.TestCaseRun.update(self.id, hash)
+        else:
+            multicall.TestCaseRun.update(self.id, hash)
 
     def update(self):
         """ Update self and containers, if modified, to the server """
@@ -3809,8 +3867,10 @@ class CaseRun(Mutable):
             """
             for caserun in TestRun(self.performance.testplan).caseruns:
                 print "{0} {1}".format(caserun.id, caserun.status)
-                caserun.status = Status("PASSED")
+                caserun.status = Status(ALLstatuses[random.randint(1,8)])
                 caserun.update()
+            if multicall_get() == 1:
+                multicall_call()
 
         def test_performance_case_runs(self):
             """
