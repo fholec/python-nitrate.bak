@@ -1631,13 +1631,17 @@ class Container(Mutable):
     #  Container Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def __init__(self, object):
+    def __init__(self, object,initial_values=None):
         """ Initialize container for specified object. """
         Mutable.__init__(self, object.id)
         self._class = object.__class__
         self._identifier = object.identifier
-        self._current = NitrateNone
-        self._original = NitrateNone
+        if initial_values is None:
+           self._current = NitrateNone
+           self._original = NitrateNone
+        else:
+           self._current = initial_values
+           self._original = initial_values
 
     def __iter__(self):
         """ Container iterator. """
@@ -3333,7 +3337,7 @@ class TestCase(Mutable):
 
         # Initialize containers
         self._bugs = Bugs(self)
-        self._tags = CaseTags(self)
+        self._tags = CaseTags(self, initial_values=testcasehash["tag"])
         self._testplans = TestPlans(self)
         self._components = CaseComponents(self)
 
@@ -3530,8 +3534,20 @@ class TestCases(Container):
         """ Fetch currently linked test cases from the server. """
         log.info("Fetching {0}'s cases".format(self._identifier))
         try:
-            self._current = set([TestCase(testcasehash=hash) for hash in
-                    self._server.TestPlan.get_test_cases(self.id)])
+            # Get testcases from a test plan
+            dictionary = self._server.TestPlan.get_all_cases_tags(self.id)
+            masterhash = []
+            # Convert tag IDs to tag names
+            for hash in self._server.TestPlan.get_test_cases(self.id):
+                tagarray = []
+                for tag in TestCase(testcasehash=hash).tags:
+                    for tagentry in dictionary:
+                        if tag == tagentry['id']:
+                            tagarray.append(tagentry['name'])
+                hash['tag'] = tagarray
+                masterhash.append(hash)
+            self._current = set(TestCase(testcasehash=hash) for hash in
+                    masterhash)
         # Work around BZ#725726 (attempt to fetch test cases by ids)
         except xmlrpclib.Fault:
             log.warning("Failed to fetch {0}'s cases, "
