@@ -23,19 +23,18 @@
 import os
 import re
 import sys
+import time
 import types
 import random
 import optparse
 import unittest
+import datetime
 import xmlrpclib
 import unicodedata
 import ConfigParser
 import logging as log
 from pprint import pformat as pretty
-from xmlrpc import NitrateError, NitrateKerbXmlrpc
-
-ALLstatuses = ['PAD', 'IDLE', 'PASSED', 'FAILED', 'RUNNING', 'PAUSED',
-               'BLOCKED', 'ERROR', 'WAIVED']
+from xmlrpc import NitrateError, NitrateKerbXmlrpc, NitrateXmlrpc
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Logging
@@ -348,6 +347,8 @@ def ascii(text):
 MULTICALL_ON = 1
 MULTICALL_OFF = 0
 
+_multicall_mode = MULTICALL_OFF
+
 def multicall_get():
     """ Get current multicall mode """
     return _multicall_mode
@@ -370,29 +371,38 @@ def multicall_set(mode=None):
     """
 
     global _multicall_mode
-    global multicall
+    global _multicall
     if mode is None:
         _multicall_mode = MULTICALL_OFF
     else:
-        if mode > 1 or mode < 0:
+        if mode not in [MULTICALL_ON, MULTICALL_OFF]:
             raise NitrateError("Invalid multicall mode '{0}'".format(mode))
         else:
             _multicall_mode = mode
     if mode == MULTICALL_ON:
-        multicall = xmlrpclib.MultiCall(Nitrate()._server)
-        set_cache_level(CACHE_OBJECTS)
-        log.info("In order to enable MultiCall feature, CACHE_CHANGES level\
-                will be used")
+        if get_cache_level() == CACHE_NONE:
+            raise NitrateError("Unable to set multicall mode because caching\
+                    is currently set on CACHE_NONE level")
+        else:
+            _multicall = xmlrpclib.MultiCall(Nitrate()._server)
+            log.info("In order to enable MultiCall feature, CACHE_CHANGES\
+                    level will be used")
     log.debug("MultiCall mode {0}".format(mode))
 
 def multicall_call():
     """ Execute multicall query """
 
-    response = multicall()
-    return None
+    return _multicall()
 
 multicall_set()
 
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#  DateTime methods
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def convert_seconds(elapsed_time):
+    return datetime.timedelta(seconds=elapsed_time)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Nitrate None Class
@@ -504,8 +514,11 @@ class Nitrate(object):
         # Connect to the server unless already connected
         if Nitrate._connection is None:
             log.info(u"Contacting server {0}".format(self._config.nitrate.url))
+#            if self._config.nitrate.username is not None:
+#                Nitrate._connection = NitrateXmlrpc.from_config('/home/fholec/.nitrate').server
+#            else:
             Nitrate._connection = NitrateKerbXmlrpc(
-                    self._config.nitrate.url).server
+                        self._config.nitrate.url).server
 
         # Return existing connection
         Nitrate._requests += 1
@@ -2284,13 +2297,15 @@ class Bugs(Mutable):
                 Test finds test plan with the same string pattern and displays
                 test cases and bug numbers related to test cases
             """
-            for testplan in\
-                    TestPlan.search(name__contains="Tier 1 / Apps"):
+            start_time = time.time()
+            for testplan in TestPlan.search(
+                    name__contains=self.performance.bug_search):
                 for testcase in testplan.testcases:
                     if testcase.bugs != None:
                         for bug in testcase.bugs:
                             print "  Related bug:" , bug.synopsis
                             print testcase.author , bug.bug
+            sys.stdout.write(convert_seconds(time.time() - start_time))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2488,8 +2503,10 @@ class CaseTags(Container):
 
         def test_performance_check_tags(self):
             """ Test prints tags from a test cases present in a test plan """
+            start_time = time.time()
             for case in TestPlan(self.performance.testplan):
-                print case, ": ", case.tags
+                log.debug(case, ": ", case.tags)
+            sys.stderr.write(str(time.time() - start_time))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3564,7 +3581,8 @@ class TestCase(Mutable):
             Test searches a pattern in all test cases and displays the result
             with their testers
         """
-        for testcase in TestCase.search(summary__contains="python"):
+        for testcase in TestCase.search(
+                summary__contains=self.performance.testcase_search):
             print "{0}: {1}".format(testcase.tester, testcase)
 
     def test_performance_author_test_cases(self):
@@ -3881,12 +3899,14 @@ class CaseRun(Mutable):
                 Test for fetching caserun states from DB and updating them
                 focusing on the updating part
             """
+            multicall_set(MULTICALL_ON)
             for caserun in TestRun(self.performance.testplan).caseruns:
                 print "{0} {1}".format(caserun.id, caserun.status)
-                caserun.status = Status(ALLstatuses[random.randint(1,8)])
+                caserun.status = Status(Status._statuses[random.randint(1,8)])
                 caserun.update()
             if multicall_get() == 1:
                 multicall_call()
+            multicall_set(MULTICALL_OFF)
 
         def test_performance_case_runs(self):
             """
@@ -3894,13 +3914,14 @@ class CaseRun(Mutable):
                 specified test plan (for example, test plans connected
                 to RHEL6.4).
             """
-            for testplan in TestPlan.search(name__contains="rhel-6.4.0"):
+            for testplan in TestPlan.search(
+                    name__contains=self.testplan_search):
                 print "{0}".format(testplan.name)
                 for testrun in testplan.testruns:
-                    print "  {0} {1} {2}".format(testrun, testrun.manager,\
+                    print "  {0} {1} {2}".format(testrun, testrun.manager,
                             testrun.status)
                     for caserun in testrun.caseruns:
-                        print "    {0} {1} {2}".format(caserun,\
+                        print "    {0} {1} {2}".format(caserun,
                                 caserun.testcase, caserun.status)
 
 

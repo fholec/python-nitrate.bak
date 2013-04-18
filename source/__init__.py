@@ -145,6 +145,6 @@ __all__ = """
         set_log_level set_cache_level set_color_mode
         get_log_level get_cache_level get_color_mode
         multicall_set multicall_get multicall_call
-        MULTICALL_ON MULTICALL_OFF ALLstatuses
+        MULTICALL_ON MULTICALL_OFF
         """.split()
 
