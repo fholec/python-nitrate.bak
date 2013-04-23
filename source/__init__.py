@@ -120,6 +120,42 @@ data of existing objects to be tested, for example:
     product = Red Hat Enterprise Linux 6
     category = Sanity
 
+Performance test suite
+~~~~~~~~~~~
+
+    [performance]
+    testplan = 8020
+    testrun = 52167
+    smalltestplan = 8030
+    smalltestrun = 52168
+    bug_search = Tier 1 / Apps
+    testcase_search = python
+    testplan_search = rhel-6.4.0
+    author = 3592
+
+Caching (using local or remote proxy)
+~~~~~~~~~~~
+
+    [cache]
+    name = User
+    type = read
+    url = http://url
+
+Init script (test bed)
+~~~~~~~~~~~
+
+    [init]
+    master_plan_name = Master TP
+    product = RHEL Tests
+    version = unspecified
+    type = Function
+    plantype = 1
+    bug = 1000
+    category = 702
+    casestatus = 2
+    build = 979
+    run_version = 389
+
 To exercise the whole test suite just run "python nitrate.py". To test
 only subset of tests pick the desired classes on the command line:
 

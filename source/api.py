@@ -2303,9 +2303,9 @@ class Bugs(Mutable):
                 for testcase in testplan.testcases:
                     if testcase.bugs != None:
                         for bug in testcase.bugs:
-                            print "  Related bug:" , bug.synopsis
-                            print testcase.author , bug.bug
-            sys.stdout.write(convert_seconds(time.time() - start_time))
+                            log.debug("  Related bug:" , bug.synopsis)
+                            log.debug(testcase.author , bug.bug)
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2506,7 +2506,7 @@ class CaseTags(Container):
             start_time = time.time()
             for case in TestPlan(self.performance.testplan):
                 log.debug(case, ": ", case.tags)
-            sys.stderr.write(str(time.time() - start_time))
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3576,24 +3576,28 @@ class TestCase(Mutable):
                         self.assertEqual(testcase.autoproposed, autoproposed)
                         self.assertEqual(testcase.manual, manual)
 
-    def test_performance_search_testcases(self):
-        """
-            Test searches a pattern in all test cases and displays the result
-            with their testers
-        """
-        for testcase in TestCase.search(
-                summary__contains=self.performance.testcase_search):
-            print "{0}: {1}".format(testcase.tester, testcase)
+        def test_performance_search_testcases(self):
+            """
+                Test searches a pattern in all test cases and displays the result
+                with their testers
+            """
+            start_time = time.time()
+            for testcase in TestCase.search(
+                    summary__contains=self.performance.testcase_search):
+                log.debug("{0}: {1}".format(testcase.tester, testcase))
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
 
-    def test_performance_author_test_cases(self):
-        """
-            Test displays test cases from specified author and also test plans
-            which contain these test cases
-        """
-        for testcase in TestCase.search(author=self.performance.author):
-            print "{0} is in test plans:".format(testcase)
-            for testplan in testcase.testplans:
-                print "  {0}".format(testplan.name)
+        def test_performance_author_test_cases(self):
+            """
+                Test displays test cases from specified author and also test plans
+                which contain these test cases
+            """
+            start_time = time.time()
+            for testcase in TestCase.search(author=self.performance.author):
+                log.debug("{0} is in test plans:".format(testcase))
+                for testplan in testcase.testplans:
+                    log.debug("  {0}".format(testplan.name))
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3900,12 +3904,14 @@ class CaseRun(Mutable):
                 focusing on the updating part
             """
             multicall_set(MULTICALL_ON)
+            start_time = time.time()
             for caserun in TestRun(self.performance.testplan).caseruns:
-                print "{0} {1}".format(caserun.id, caserun.status)
+                log.debug("{0} {1}".format(caserun.id, caserun.status))
                 caserun.status = Status(Status._statuses[random.randint(1,8)])
                 caserun.update()
             if multicall_get() == 1:
                 multicall_call()
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
             multicall_set(MULTICALL_OFF)
 
         def test_performance_case_runs(self):
@@ -3914,15 +3920,17 @@ class CaseRun(Mutable):
                 specified test plan (for example, test plans connected
                 to RHEL6.4).
             """
+            start_time = time.time()
             for testplan in TestPlan.search(
-                    name__contains=self.testplan_search):
-                print "{0}".format(testplan.name)
+                    name__contains=self.performance.testplan_search):
+                log.debug("{0}".format(testplan.name))
                 for testrun in testplan.testruns:
-                    print "  {0} {1} {2}".format(testrun, testrun.manager,
-                            testrun.status)
+                    log.debug("  {0} {1} {2}".format(testrun, testrun.manager,
+                            testrun.status))
                     for caserun in testrun.caseruns:
-                        print "    {0} {1} {2}".format(caserun,
-                                caserun.testcase, caserun.status)
+                        log.debug("    {0} {1} {2}".format(caserun,
+                                caserun.testcase, caserun.status))
+            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
