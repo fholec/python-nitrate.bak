@@ -1,0 +1,335 @@
+From 164ca596e911ac09dd3ea5347ecaaa26218180e9 Mon Sep 17 00:00:00 2001
+From: Filip Holec <fholec@redhat.com>
+Date: Tue, 23 Apr 2013 16:00:22 +0200
+Subject: [PATCH] TestBed and TestSuite
+
+---
+ init_tcms.py       |   69 ++++++++++++
+ source/__init__.py |   44 ++++++++
+ source/api.py      |  295 +++++++++++++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 393 insertions(+), 15 deletions(-)
+ create mode 100755 init_tcms.py
+
+diff --git a/init_tcms.py b/init_tcms.py
+new file mode 100755
+index 0000000..9dd876c
+--- /dev/null
++++ b/init_tcms.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python
++
++import nitrate, qe
++import xmlrpclib
++import random
++import optparse
++from os import system
++
++TAGS = {0:"Apps", 1:"Tier 1", 2:"new", 3:"Tier 2", 4:"TIP"}
++
++# Import test data from .nitrate configuration file
++# ! .nitrate has to contain [init] section !
++initconfig = nitrate.Nitrate()._config.init
++
++if __name__ == "__main__":
++    parser = optparse.OptionParser(
++            usage = "./init_tcms [--plans #] [--runs #] [--cases #]")
++    parser.add_option("--plans",
++            dest = "plans",
++            type = "int",
++            action = "store",
++            default = 1,
++            help = "create specified number of plans")
++    parser.add_option("--runs",
++            dest = "runs",
++            type = "int",
++            action = "store",
++            default = 1,
++            help = "create specified number of runs")
++    parser.add_option("--cases",
++            dest = "cases",
++            type = "int",
++            action = "store",
++            default = 1,
++            help = "create specified number of cases")
++    (options, arguments) = parser.parse_args()
++
++    # Create master plan (root)
++    master = nitrate.TestPlan(name=initconfig.master_plan_name, \
++        product=initconfig.product, version="unspecified", \
++        type=nitrate.PlanType(initconfig.plantype))
++    master.update()
++
++    for i in range(0, options.plans):
++        # Create Plans
++        tplan = nitrate.TestPlan(name="Test Plan {0}".format(i+1),\
++            parent=master.id, product=initconfig.product, version="unspecified",\
++            type=nitrate.PlanType(initconfig.plantype))
++        tplan.update()
++        for c in range(0, options.cases):
++            # Create cases
++            case = nitrate.TestCase(name="Test Case {0}".format(i+1),\
++                    category=nitrate.Category(initconfig.category),\
++                    product=initconfig.product,\
++                    summary="Test Case {0}".format(i+1),\
++                    status=nitrate.CaseStatus(initconfig.casestatus))
++            case.update()
++            # Link with TestPlan
++            nitrate.TestCase(case.id).testplans._add([nitrate.TestPlan(tplan.id)])
++            # Add a tag
++            nitrate.TestCase(case.id).tags._add([TAGS[random.randint(0,4)]])
++            # Add bug
++            nitrate.TestCase(case.id).bugs.add(nitrate.Bug(initconfig.bug))
++        for r in range(0, options.runs):
++            # Create runs
++            run = nitrate.TestRun(name="Test Run {0}".format(i+1),\
++                    testplan=nitrate.TestPlan(tplan.id), build=nitrate.Build(initconfig.build),\
++                    product=initconfig.product, summary="Test Run",\
++                    version=nitrate.Version(initconfig.run_version).name)
+diff --git a/source/__init__.py b/source/__init__.py
+index 59a98f0..21234d8 100644
+--- a/source/__init__.py
++++ b/source/__init__.py
+@@ -106,6 +106,10 @@ data of existing objects to be tested, for example:
+     version = 6.1
+     status = ENABLED
+ 
++    [plantype]
++    id = 1
++    name = General
++
+     [testrun]
+     id = 6757
+     summary = Test Run Summary
+@@ -113,8 +117,45 @@ data of existing objects to be tested, for example:
+     [testcase]
+     id = 1234
+     summary = Test case summary
++    product = Red Hat Enterprise Linux 6
+     category = Sanity
+ 
++Performance test suite
++~~~~~~~~~~~
++
++    [performance]
++    testplan = 8020
++    testrun = 52167
++    smalltestplan = 8030
++    smalltestrun = 52168
++    bug_search = Tier 1 / Apps
++    testcase_search = python
++    testplan_search = rhel-6.4.0
++    author = 3592
++
++Caching (using local or remote proxy)
++~~~~~~~~~~~
++
++    [cache]
++    name = User
++    type = read
++    url = http://url
++
++Init script (test bed)
++~~~~~~~~~~~
++
++    [init]
++    master_plan_name = Master TP
++    product = RHEL Tests
++    version = unspecified
++    type = Function
++    plantype = 1
++    bug = 1000
++    category = 702
++    casestatus = 2
++    build = 979
++    run_version = 389
++
+ To exercise the whole test suite just run "python nitrate.py". To test
+ only subset of tests pick the desired classes on the command line:
+ 
+@@ -138,5 +179,8 @@ __all__ = """
+         setCacheLevel CACHE_NONE CACHE_CHANGES CACHE_OBJECTS CACHE_ALL
+         setColorMode COLOR_ON COLOR_OFF COLOR_AUTO
+         set_log_level set_cache_level set_color_mode
++        get_log_level get_cache_level get_color_mode
++        multicall_set multicall_get multicall_call
++        MULTICALL_ON MULTICALL_OFF
+         """.split()
+ 
+diff --git a/source/api.py b/source/api.py
+index 76c0c1f..9e9c748 100644
+--- a/source/api.py
++++ b/source/api.py
+@@ -23,15 +23,18 @@
+ import os
+ import re
+ import sys
++import time
+ import types
++import random
++import optparse
+ import unittest
++import datetime
+ import xmlrpclib
+ import unicodedata
+ import ConfigParser
+ import logging as log
+ from pprint import pformat as pretty
+-from xmlrpc import NitrateError, NitrateKerbXmlrpc
+-
++from xmlrpc import NitrateError, NitrateKerbXmlrpc, NitrateXmlrpc
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Logging
+
++# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++#  DateTime methods
++# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++
++def convert_seconds(elapsed_time):
++    return datetime.timedelta(seconds=elapsed_time)
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Nitrate None Class
+@@ -2192,6 +2284,29 @@ class Bugs(Mutable):
+         # Currently no caching for bugs, changes applied immediately
+         pass
+ 
++    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++    #  Bugs Self Test
++    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++    class _test(unittest.TestCase):
++        def setUp(self):
++            """ Set up performance test configuration from the config """
++            self.performance = Nitrate()._config.performance
++
++        def test_performance_case_bugs(self):
++            """
++                Test finds test plan with the same string pattern and displays
++                test cases and bug numbers related to test cases
++            """
++            start_time = time.time()
++            for testplan in TestPlan.search(
++                    name__contains=self.performance.bug_search):
++                for testcase in testplan.testcases:
++                    if testcase.bugs != None:
++                        for bug in testcase.bugs:
++                            log.debug("  Related bug:" , bug.synopsis)
++                            log.debug(testcase.author , bug.bug)
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Plan Tags Class
+@@ -2356,6 +2471,8 @@ class CaseTags(Container):
+         def setUp(self):
+             """ Set up test case from the config """
+             self.testcase = Nitrate()._config.testcase
++            self.performance = Nitrate()._config.performance
++
+ 
+         def testTagging1(self):
+             """ Untagging a test case """
+@@ -2384,6 +2501,13 @@ class CaseTags(Container):
+             testcase = TestCase(self.testcase.id)
+             self.assertTrue("TestTag" not in testcase.tags)
+ 
++        def test_performance_check_tags(self):
++            """ Test prints tags from a test cases present in a test plan """
++            start_time = time.time()
++            for case in TestPlan(self.performance.testplan):
++                log.debug(case, ": ", case.tags)
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Test Plan Class
+@@ -3342,6 +3468,7 @@ class TestCase(Mutable):
+         def setUp(self):
+             """ Set up test case from the config """
+             self.testcase = Nitrate()._config.testcase
++            self.performance = Nitrate()._config.performance
+ 
+         def testCreateInvalid(self):
+             """ Create a new test case (missing required parameters) """
+@@ -3406,6 +3576,29 @@ class TestCase(Mutable):
+                         self.assertEqual(testcase.autoproposed, autoproposed)
+                         self.assertEqual(testcase.manual, manual)
+ 
++        def test_performance_search_testcases(self):
++            """
++                Test searches a pattern in all test cases and displays the result
++                with their testers
++            """
++            start_time = time.time()
++            for testcase in TestCase.search(
++                    summary__contains=self.performance.testcase_search):
++                log.debug("{0}: {1}".format(testcase.tester, testcase))
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++
++        def test_performance_author_test_cases(self):
++            """
++                Test displays test cases from specified author and also test plans
++                which contain these test cases
++            """
++            start_time = time.time()
++            for testcase in TestCase.search(author=self.performance.author):
++                log.debug("{0} is in test plans:".format(testcase))
++                for testplan in testcase.testplans:
++                    log.debug("  {0}".format(testplan.name))
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Test Cases Class
+@ -3682,6 +3890,48 @@ class CaseRun(Mutable):
+         # Update self (if modified)
+         Mutable.update(self)
+ 
++    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++    #  Case Runs Self Test
++    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++    class _test(unittest.TestCase):
++        def setUp(self):
++            """ Set up performance test configuration from the config """
++            self.performance = Nitrate()._config.performance
++
++        def test_performance_update_caseruns(self):
++            """
++                Test for fetching caserun states from DB and updating them
++                focusing on the updating part
++            """
++            multicall_set(MULTICALL_ON)
++            start_time = time.time()
++            for caserun in TestRun(self.performance.testplan).caseruns:
++                log.debug("{0} {1}".format(caserun.id, caserun.status))
++                caserun.status = Status(Status._statuses[random.randint(1,8)])
++                caserun.update()
++            if multicall_get() == 1:
++                multicall_call()
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++            multicall_set(MULTICALL_OFF)
++
++        def test_performance_case_runs(self):
++            """
++                Test for printing test cases that test run contains in
++                specified test plan (for example, test plans connected
++                to RHEL6.4).
++            """
++            start_time = time.time()
++            for testplan in TestPlan.search(
++                    name__contains=self.performance.testplan_search):
++                log.debug("{0}".format(testplan.name))
++                for testrun in testplan.testruns:
++                    log.debug("  {0} {1} {2}".format(testrun, testrun.manager,
++                            testrun.status))
++                    for caserun in testrun.caseruns:
++                        log.debug("    {0} {1} {2}".format(caserun,
++                                caserun.testcase, caserun.status))
++            sys.stderr.write(" {0} ".format(str(convert_seconds(time.time() - start_time))))
++
+ 
+ # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ #  Self Test
+-- 
+1.7.1
+
