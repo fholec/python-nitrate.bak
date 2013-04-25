@@ -1694,13 +1694,17 @@ class Container(Mutable):
     #  Container Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    def __init__(self, object):
+    def __init__(self, object,initial_values=None):
         """ Initialize container for specified object. """
         Mutable.__init__(self, object.id)
         self._class = object.__class__
         self._identifier = object.identifier
-        self._current = NitrateNone
-        self._original = NitrateNone
+        if initial_values is None:
+           self._current = NitrateNone
+           self._original = NitrateNone
+        else:
+           self._current = initial_values
+           self._original = initial_values
 
     def __iter__(self):
         """ Container iterator. """
@@ -2274,6 +2278,105 @@ class Bugs(Mutable):
         """ Save bug changes to the server. """
         # Currently no caching for bugs, changes applied immediately
         pass
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#  Tag Class
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class Tag(Nitrate):
+    """ Tag Class """
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  Tag Properties
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Read-only properties
+    id = property(_getter("id"), doc="Tag id")
+    name = property(_getter("name"), doc="Tag name")
+
+    # Local cache for Tag
+    _cache = {}
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  Tag Special
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    def __new__(cls, id=None, **kwargs):
+        """ Create a new object, handle caching if enabled. """
+        if _cache_level >= CACHE_OBJECTS and id is not None:
+            # Search the cache
+            if id in Tag._cache:
+                log.debug("Using cached tag ID#{0}".format(id))
+                return Tag._cache[id]
+            # Not cached yet, create a new one and cache
+            else:
+                log.debug("Caching tag ID#{0}".format(id))
+                new = Nitrate.__new__(cls)
+                Tag._cache[id] = new
+                return new
+        else:
+            return Nitrate.__new__(cls)
+
+    def __init__(self, arg):
+        """ Initialize by tag id or tag name """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
+
+        # Initialized by id
+        if isinstance(arg, int):
+            self._name = NitrateNone
+            id = arg
+        # Initialized by name
+        elif isinstance(arg, str):
+            self._name = arg
+            id = None
+        # Both
+        elif isinstance(arg, hash):
+            # Create entry in cache
+            pass
+        else:
+            raise NitrateError("Need either tag id or tag name "
+                    "to initialize the Tag object.")
+        Nitrate.__init__(self, id)
+
+    def __unicode__(self):
+        """ Tag name for printing. """
+        return self.name
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #  Tag Methods
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    def _get(self):
+        """ Fetch tag data from the server. """
+
+        # Search by id
+        if self._id is not NitrateNone:
+            try:
+                log.info("Fetching tag" + self.identifier)
+                hash = self._server.Tag.get_tags({'ids': [self.id]})
+                log.debug("Initializing tags " + self.identifier)
+                log.debug(pretty(hash))
+                self._name = hash[0]["name"]
+                print self._name
+            except IndexError:
+                raise NitrateError(
+                        "Cannot find tag for {0}".format(self.identifier))
+        # Search by tag name
+        else:
+            try:
+                log.info(u"Fetching tag '{0}'".format(self.name))
+                hash = self._server.Tag.get_tags(
+                        {'names': [self.name]})
+                log.debug(u"Initializing tag '{0}'".format(
+                        self.name))
+                log.debug(pretty(hash))
+                self._id = hash[0]["id"]
+            except IndexError:
+                raise NitrateError(
+                        "Cannot find tag for '{0}'".format(self.name))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3380,7 +3483,7 @@ class TestCase(Mutable):
 
         # Initialize containers
         self._bugs = Bugs(self)
-        self._tags = CaseTags(self)
+        self._tags = CaseTags(self, initial_values=testcasehash["tag"])
         self._testplans = TestPlans(self)
         self._components = CaseComponents(self)
 
@@ -3586,8 +3689,15 @@ class TestCases(Container):
         """ Fetch currently linked test cases from the server. """
         log.info("Fetching {0}'s cases".format(self._identifier))
         try:
-            self._current = set([TestCase(testcasehash=hash) for hash in
-                    self._server.TestPlan.get_test_cases(self.id)])
+            masterhash = []
+            # Convert tag IDs to tag names
+            for hash in self._server.TestPlan.get_test_cases(self.id):
+                for tag in TestCase(testcasehash=hash).tags:
+                    hash[tag] = Tag(tag).name
+                    print "Tag ID: {0} | Tag Name: {1}".format(tag, hash[tag])
+                    masterhash.append(hash)
+            self._current = set(TestCase(testcasehash=hash) for hash in
+                    masterhash)
         # Work around BZ#725726 (attempt to fetch test cases by ids)
         except xmlrpclib.Fault:
             log.warning("Failed to fetch {0}'s cases, "
