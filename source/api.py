@@ -482,6 +482,7 @@ class Nitrate(object):
     _connection = None
     _settings = None
     _requests = 0
+    _cache = {}
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Nitrate Properties
@@ -519,9 +520,37 @@ class Nitrate(object):
         Nitrate._requests += 1
         return Nitrate._connection
 
+    @classmethod
+    def _is_cached(cls, id=None):
+        try:
+            return cls._cache[id]
+        except KeyError:
+            return None
+
+    @classmethod
+    def cache(cls, objects=None):
+        return cls._fetch_to_cache(objects)
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Nitrate Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    def __new__(cls, id=None, initial_values=None, **kwargs):
+        """ Create a new object, handle caching if enabled. """
+        if _cache_level >= CACHE_OBJECTS and id is not None:
+            # Search the cache for ID
+            if id in cls._cache:
+                log.debug("Using cached object {0} {1}".format(\
+                        cls.__name__, id))
+                return cls._cache[id]
+            else:
+                # Object not cached yet, create a new one and cache it
+                log.debug("Caching {0} {1}".format(cls.__name__, id))
+                new = super(Nitrate, cls).__new__(cls)
+                cls._cache[id] = new
+                return new
+        else:
+            return super(Nitrate, cls).__new__(cls)
 
     def __init__(self, id=None, prefix="ID"):
         """ Initialize the object id, prefix and internal attributes. """
@@ -644,6 +673,9 @@ class Utils(Nitrate):
 class Build(Nitrate):
     """ Product build. """
 
+    # Local cache of Build
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Build Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -659,6 +691,10 @@ class Build(Nitrate):
 
     def __init__(self, id=None, product=None, build=None):
         """ Initialize by build id or product and build name. """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Initialized by id
         if id is not None:
@@ -725,7 +761,7 @@ class Category(Nitrate):
     """ Test case category. """
 
     # Local cache of Category objects indexed by category id
-    _categories = {}
+    _cache = {}
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Category Properties
@@ -745,22 +781,6 @@ class Category(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Category Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    def __new__(cls, id=None, product=None, category=None):
-        """ Create a new object, handle caching if enabled. """
-        if _cache_level >= CACHE_OBJECTS and id is not None:
-            # Search the cache
-            if id in Category._categories:
-                log.debug("Using cached category ID#{0}".format(id))
-                return Category._categories[id]
-            # Not cached yet, create a new one and cache
-            else:
-                log.debug("Caching category ID#{0}".format(id))
-                new = Nitrate.__new__(cls)
-                Category._categories[id] = new
-                return new
-        else:
-            return Nitrate.__new__(cls)
 
     def __init__(self, id=None, product=None, category=None):
         """ Initialize by category id or product and category name. """
@@ -888,7 +908,7 @@ class PlanType(Nitrate):
     """ Plan type """
 
     # Local cache of PlanType objects indexed by plan type id
-    _plantypes = {}
+    _cache = {}
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  PlanType Properties
@@ -901,22 +921,6 @@ class PlanType(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  PlanType Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    def __new__(cls, id=None, name=None):
-        """ Create a new object, handle caching if enabled. """
-        if _cache_level >= CACHE_OBJECTS and id is not None:
-            # Search the cache
-            if id in PlanType._plantypes:
-                log.debug("Using cached plantype ID#{0}".format(id))
-                return PlanType._plantypes[id]
-            # Not cached yet, create a new one and cache
-            else:
-                log.debug("Caching plantype ID#{0}".format(id))
-                new = Nitrate.__new__(cls)
-                PlanType._plantypes[id] = new
-                return new
-        else:
-            return Nitrate.__new__(cls)
 
     def __init__(self, id=None, name=None):
         """ Initialize by test plan type id or name """
@@ -1090,6 +1094,9 @@ class Priority(Nitrate):
 class Product(Nitrate):
     """ Product. """
 
+    # Local cache of Product
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Product Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1112,6 +1119,10 @@ class Product(Nitrate):
         One of id or name parameters must be provided. Optional version
         argument sets the default product version.
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Initialize by id
         if id is not None:
@@ -1404,7 +1415,7 @@ class User(Nitrate):
     """ User. """
 
     # Local cache of User objects indexed by user id
-    _users = {}
+    _cache = {}
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  User Properties
@@ -1419,29 +1430,6 @@ class User(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  User Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    def __new__(cls, id=None, login=None, email=None, hash=None):
-        """ Create a new object, handle caching if enabled. """
-        id, login, email = cls._parse(id, login, email)
-        # Fetch all users if in CACHE_ALL level and the cache is still empty
-        if hash is None and _cache_level == CACHE_ALL and not User._users:
-            log.info("Caching all users")
-            for hash in Nitrate()._server.User.filter({}):
-                user = User(hash=hash)
-                User._users[user.id] = user
-        if hash is None and _cache_level >= CACHE_OBJECTS and id is not None:
-            # Search the cache
-            if id in User._users:
-                log.debug("Using cached user UID#{0}".format(id))
-                return User._users[id]
-            # Not cached yet, create a new one and cache
-            else:
-                log.debug("Caching user UID#{0}".format(id))
-                new = Nitrate.__new__(cls)
-                User._users[id] = new
-                return new
-        else:
-            return Nitrate.__new__(cls)
 
     def __init__(self, id=None, login=None, email=None, hash=None):
         """ Initialize by user id, login or email.
@@ -1555,6 +1543,9 @@ class User(Nitrate):
 class Version(Nitrate):
     """ Product version. """
 
+    # Local cache of Version
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Version Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1570,6 +1561,10 @@ class Version(Nitrate):
 
     def __init__(self, id=None, product=None, version=None):
         """ Initialize by version id or product and version. """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Initialized by id
         if id is not None:
@@ -1804,7 +1799,7 @@ class Component(Nitrate):
     """ Test case component. """
 
     # Local cache of Component objects indexed by component id
-    _components = {}
+    _cache = {}
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Component Properties
@@ -1823,22 +1818,6 @@ class Component(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Component Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    def __new__(cls, id=None, name=None, product=None, **kwargs):
-        """ Create a new object, handle caching if enabled. """
-        if _cache_level >= CACHE_OBJECTS and id is not None:
-            # Search the cache
-            if id in Component._components:
-                log.debug("Using cached component ID#{0}".format(id))
-                return Component._components[id]
-            # Not cached yet, create a new one and cache
-            else:
-                log.debug("Caching component ID#{0}".format(id))
-                new = Nitrate.__new__(cls)
-                Component._components[id] = new
-                return new
-        else:
-            return Nitrate.__new__(cls)
 
     def __init__(self, id=None, name=None, product=None, **kwargs):
         """ Initialize by component id or product and component name. """
@@ -2073,6 +2052,9 @@ class CaseComponents(Container):
 class Bug(Nitrate):
     """ Bug related to a test case or a case run. """
 
+    # Local cache of Bug
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Bug Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2104,6 +2086,10 @@ class Bug(Nitrate):
         Provide external bug id, optionally bug system (Bugzilla by default)
         and related testcase and/or caserun object or provide complete hash.
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Initialize id & values
         if bug is not None:
@@ -2300,22 +2286,6 @@ class Tag(Nitrate):
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Tag Special
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    def __new__(cls, id=None, **kwargs):
-        """ Create a new object, handle caching if enabled. """
-        if _cache_level >= CACHE_OBJECTS and id is not None:
-            # Search the cache
-            if id in Tag._cache:
-                log.debug("Using cached tag ID#{0}".format(id))
-                return Tag._cache[id]
-            # Not cached yet, create a new one and cache
-            else:
-                log.debug("Caching tag ID#{0}".format(id))
-                new = Nitrate.__new__(cls)
-                Tag._cache[id] = new
-                return new
-        else:
-            return Nitrate.__new__(cls)
 
     def __init__(self, arg):
         """ Initialize by tag id or tag name """
@@ -2595,6 +2565,9 @@ class TestPlan(Mutable):
     properties, the latter as the default iterator.
     """
 
+    # Local cache of TestPlan
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Test Plan Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2654,6 +2627,10 @@ class TestPlan(Mutable):
             parent ...... Parent test plan (object or id, default: None)
 
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Prepare attributes, check test plan hash, initialize
         self._attributes = """author children name parent product status tags
@@ -2907,6 +2884,9 @@ class TestRun(Mutable):
     relevant case runs (which is also the default iterator).
     """
 
+    # Local cache of TestRun
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Test Run Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2985,6 +2965,10 @@ class TestRun(Mutable):
         be provided as a list of test case objects or a list of ids. By
         default all CONFIRMED test cases are linked to the created run.
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Prepare attributes, check test run hash, initialize
         self._attributes = """build caseruns errata manager notes product
@@ -3240,6 +3224,9 @@ class TestCase(Mutable):
     properties.
     """
 
+    # Local cache of TestCase
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Test Case Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3320,6 +3307,10 @@ class TestCase(Mutable):
             tester ......... user object or login (default: None)
             link ........... reference link
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Prepare attributes, check test case hash, initialize
         self._attributes = """arguments author automated autoproposed bugs
@@ -3790,6 +3781,9 @@ class CaseRun(Mutable):
     the relevant 'testcase' object.
     """
 
+    # Local cache of CaseRun
+    _cache = {}
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #  Case Run Properties
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3826,6 +3820,10 @@ class CaseRun(Mutable):
         Initialize an existing test case run (if id provided) or create
         a new test case run (based on provided test case and test run).
         """
+
+        # If we are a cached-already object no init is necessary
+        if getattr(self, "_id", None) is not None:
+            return
 
         # Prepare attributes, check data hashes, initialize
         self._attributes = """assignee bugs build notes sortkey status
